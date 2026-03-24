@@ -1,4 +1,4 @@
-import db from '@/lib/database';
+import { getAllEvents } from '@/lib/api';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -9,48 +9,31 @@ export default function CalendarioScreen() {
   const [markedDates, setMarkedDates] = useState<any>({});
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [tasksByDate, setTasksByDate] = useState<any[]>([]);
+  const [allTasks, setAllTasks] = useState<any[]>([]);
 
   const loadDates = useCallback(() => {
-    const tasks = db.getAllSync(
-      `SELECT titulo, categoria, importance, fecha, status FROM events WHERE deleted = 0 AND fecha != ''`
-    ) as any[];
-
-    const marks: any = {};
-    tasks.forEach((task: any) => {
-      if (!task.fecha) return;
-      const color = task.status === 'done' ? '#A5CB90' : task.status === 'in_progress' ? '#F4A261' : '#7BAE7F';
-      if (!marks[task.fecha]) marks[task.fecha] = { dots: [] };
-      if (marks[task.fecha].dots.length < 3) marks[task.fecha].dots.push({ color });
-    });
-    setMarkedDates(marks);
-  }, []);
-
-  const loadTasksForDate = useCallback((date: string) => {
-    const tasks = db.getAllSync(
-      `SELECT titulo, categoria, importance, status FROM events WHERE deleted = 0 AND fecha = ?`,
-      [date]
-    ) as any[];
-    setTasksByDate(tasks);
+    getAllEvents().then((tasks: any[]) => {
+      setAllTasks(tasks);
+      const marks: any = {};
+      tasks.forEach((task: any) => {
+        if (!task.fecha) return;
+        const color = task.status === 'done' ? '#A5CB90' : task.status === 'in_progress' ? '#F4A261' : '#7BAE7F';
+        if (!marks[task.fecha]) marks[task.fecha] = { dots: [] };
+        if (marks[task.fecha].dots.length < 3) marks[task.fecha].dots.push({ color });
+      });
+      setMarkedDates(marks);
+    }).catch(console.error);
   }, []);
 
   useFocusEffect(useCallback(() => { loadDates(); }, []));
 
   const onDayPress = (day: any) => {
     setSelectedDate(day.dateString);
-    loadTasksForDate(day.dateString);
+    setTasksByDate(allTasks.filter((t: any) => t.fecha === day.dateString));
   };
 
-  const statusColor = (status: string) => {
-    if (status === 'done') return '#A5CB90';
-    if (status === 'in_progress') return '#FFE5A0';
-    return '#E8E3D9';
-  };
-
-  const statusLabel = (status: string) => {
-    if (status === 'done') return 'Completada';
-    if (status === 'in_progress') return 'En progreso';
-    return 'Pendiente';
-  };
+  const statusColor = (status: string) => status === 'done' ? '#A5CB90' : status === 'in_progress' ? '#FFE5A0' : '#E8E3D9';
+  const statusLabel = (status: string) => status === 'done' ? 'Completada' : status === 'in_progress' ? 'En progreso' : 'Pendiente';
 
   const selectedMarks = selectedDate ? {
     ...markedDates,
@@ -59,73 +42,39 @@ export default function CalendarioScreen() {
 
   return (
     <View style={styles.container}>
-
       <TouchableOpacity style={styles.backBtn} onPress={() => router.push('/(tabs)')}>
         <Text style={styles.backBtnText}>← Back</Text>
       </TouchableOpacity>
-
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.calendarCard}>
-          <Calendar
-            markingType="multi-dot"
-            markedDates={selectedMarks}
-            onDayPress={onDayPress}
-            theme={{
-              backgroundColor: 'transparent',
-              calendarBackground: 'transparent',
-              todayTextColor: '#7BAE7F',
-              selectedDayBackgroundColor: '#7BAE7F',
-              selectedDayTextColor: 'white',
-              arrowColor: '#7BAE7F',
-              monthTextColor: '#3D5A3E',
-              textMonthFontWeight: 'bold',
-              textMonthFontSize: 16,
-              dayTextColor: '#3D5A3E',
-              textDisabledColor: '#ccc',
-              dotColor: '#7BAE7F',
-            }}
-          />
+          <Calendar markingType="multi-dot" markedDates={selectedMarks} onDayPress={onDayPress}
+            theme={{ backgroundColor: 'transparent', calendarBackground: 'transparent', todayTextColor: '#7BAE7F', selectedDayBackgroundColor: '#7BAE7F', selectedDayTextColor: 'white', arrowColor: '#7BAE7F', monthTextColor: '#3D5A3E', textMonthFontWeight: 'bold', textMonthFontSize: 16, dayTextColor: '#3D5A3E', textDisabledColor: '#ccc' }} />
         </View>
-
-        {selectedDate && (
+        {selectedDate ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Tareas para {selectedDate}</Text>
-            {tasksByDate.length === 0 ? (
-              <Text style={styles.empty}>No hay tareas para este dia.</Text>
-            ) : (
+            {tasksByDate.length === 0 ? <Text style={styles.empty}>No hay tareas para este dia.</Text> : (
               tasksByDate.map((task: any, i: number) => (
                 <View key={i} style={[styles.taskCard, { borderLeftColor: statusColor(task.status), borderLeftWidth: 4 }]}>
                   <View style={styles.taskHeader}>
                     <Text style={[styles.taskTitle, task.status === 'done' && styles.taskDone]}>{task.titulo}</Text>
-                    <Text style={[styles.badge, {
-                      backgroundColor: task.importance === 'Alta' ? '#FFB3C6' : task.importance === 'Media' ? '#FFE5A0' : '#A5CB90'
-                    }]}>{task.importance}</Text>
+                    <Text style={[styles.badge, { backgroundColor: task.importance === 'Alta' ? '#FFB3C6' : task.importance === 'Media' ? '#FFE5A0' : '#A5CB90' }]}>{task.importance}</Text>
                   </View>
                   <Text style={styles.taskMeta}>{task.categoria}</Text>
-                  <Text style={[styles.statusText, { color: task.status === 'done' ? '#7BAE7F' : task.status === 'in_progress' ? '#F4A261' : '#999' }]}>
-                    {statusLabel(task.status)}
-                  </Text>
+                  <Text style={[styles.statusText, { color: task.status === 'done' ? '#7BAE7F' : task.status === 'in_progress' ? '#F4A261' : '#999' }]}>{statusLabel(task.status)}</Text>
                 </View>
               ))
             )}
           </View>
+        ) : (
+          <View style={styles.card}><Text style={styles.empty}>Toca un dia para ver las tareas.</Text></View>
         )}
-
-        {!selectedDate && (
-          <View style={styles.card}>
-            <Text style={styles.empty}>Toca un dia para ver las tareas.</Text>
-          </View>
-        )}
-
         <View style={styles.legend}>
           <Text style={styles.legendTitle}>Referencia de colores</Text>
           <View style={styles.legendRow}>
-            <View style={[styles.legendDot, { backgroundColor: '#7BAE7F' }]} />
-            <Text style={styles.legendText}>Pendiente</Text>
-            <View style={[styles.legendDot, { backgroundColor: '#F4A261' }]} />
-            <Text style={styles.legendText}>En progreso</Text>
-            <View style={[styles.legendDot, { backgroundColor: '#A5CB90' }]} />
-            <Text style={styles.legendText}>Completada</Text>
+            <View style={[styles.legendDot, { backgroundColor: '#7BAE7F' }]} /><Text style={styles.legendText}>Pendiente</Text>
+            <View style={[styles.legendDot, { backgroundColor: '#F4A261' }]} /><Text style={styles.legendText}>En progreso</Text>
+            <View style={[styles.legendDot, { backgroundColor: '#A5CB90' }]} /><Text style={styles.legendText}>Completada</Text>
           </View>
         </View>
       </ScrollView>

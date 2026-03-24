@@ -1,4 +1,4 @@
-import db from '@/lib/database';
+import { getAllEvents } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -10,34 +10,22 @@ export default function InicioScreen() {
   const [upcoming, setUpcoming] = useState<any[]>([]);
 
   const loadData = useCallback(() => {
-    const all = db.getAllSync(`SELECT status FROM events WHERE deleted = 0`);
-    const done = all.filter((t: any) => t.status === 'done').length;
-    const in_progress = all.filter((t: any) => t.status === 'in_progress').length;
-    const pendiente = all.filter((t: any) => t.status === 'pendiente').length;
-    setStats({ done, in_progress, pendiente });
-
-    const next = db.getAllSync(`
-      SELECT titulo, categoria, importance, fecha 
-      FROM events 
-      WHERE done = 0 AND deleted = 0 
-      ORDER BY fecha ASC 
-      LIMIT 5
-    `);
-    setUpcoming(next);
+    getAllEvents().then((all: any[]) => {
+      setStats({
+        done: all.filter(t => t.status === 'done').length,
+        in_progress: all.filter(t => t.status === 'in_progress').length,
+        pendiente: all.filter(t => t.status === 'pendiente').length,
+      });
+      setUpcoming(all.filter(t => t.done === 0).sort((a, b) => a.fecha?.localeCompare(b.fecha)).slice(0, 5));
+    }).catch(console.error);
   }, []);
 
   useFocusEffect(loadData);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-
-      <Image
-        source={{ uri: 'https://i.redd.it/y8djj6h6l8041.gif' }}
-        style={styles.headerGif}
-        resizeMode="cover"
-      />
-
-      <Text style={styles.title}>🦇 Reminders</Text>
+      <Image source={{ uri: 'https://i.redd.it/y8djj6h6l8041.gif' }} style={styles.headerGif} resizeMode="cover" />
+      <Text style={styles.title}>BatiReminder</Text>
 
       <View style={styles.statsRow}>
         <View style={[styles.statCard, { backgroundColor: '#A5CB90' }]}>
@@ -88,7 +76,6 @@ export default function InicioScreen() {
           </TouchableOpacity>
         </View>
       </View>
-
     </ScrollView>
   );
 }

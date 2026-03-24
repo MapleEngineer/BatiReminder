@@ -1,9 +1,8 @@
-import db from '@/lib/database';
+import { getAllEvents, getAnalytics, getProyectos } from '@/lib/api';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-const SCREEN_WIDTH = Dimensions.get('window').width - 64;
 const CAT_COLORS = ['#C9B8E8', '#A8D8EA', '#FFE5A0', '#FFB3C6', '#A5CB90', '#F4A261', '#7BAE7F'];
 
 function BarChart({ data, colorKey }: { data: { label: string; value: number; color?: string }[]; colorKey?: string[] }) {
@@ -29,9 +28,7 @@ function DonutChart({ slices }: { slices: { label: string; value: number; color:
   return (
     <View>
       <View style={{ flexDirection: 'row', height: 20, borderRadius: 10, overflow: 'hidden', marginBottom: 10 }}>
-        {slices.filter(s => s.value > 0).map((s, i) => (
-          <View key={i} style={{ flex: s.value, backgroundColor: s.color }} />
-        ))}
+        {slices.filter(s => s.value > 0).map((s, i) => <View key={i} style={{ flex: s.value, backgroundColor: s.color }} />)}
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {slices.map((s, i) => (
@@ -45,96 +42,39 @@ function DonutChart({ slices }: { slices: { label: string; value: number; color:
   );
 }
 
-function LineChart({ data }: { data: { x: number; y: number; label: string }[] }) {
-  if (data.length < 2) return <Text style={{ color: '#888', fontStyle: 'italic' }}>Sin datos suficientes</Text>;
-  const maxY = Math.max(...data.map(d => d.y), 1);
-  const height = 80;
-  return (
-    <View>
-      <View style={{ height, flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
-        {data.map((d, i) => (
-          <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-            <View style={{ width: '70%', height: Math.max(4, Math.round(d.y / maxY * height)), backgroundColor: '#7BAE7F', borderRadius: 3 }} />
-          </View>
-        ))}
-      </View>
-      <View style={{ flexDirection: 'row', marginTop: 4, gap: 4 }}>
-        {data.map((d, i) => (
-          <Text key={i} style={{ flex: 1, fontSize: 8, color: '#888', textAlign: 'center' }} numberOfLines={1}>{d.label}</Text>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 export default function AnalyticsScreen() {
   const [stats, setStats] = useState<any>({});
   const [catStats, setCatStats] = useState<any[]>([]);
   const [importanceStats, setImportanceStats] = useState<any[]>([]);
   const [topEvents, setTopEvents] = useState<any[]>([]);
   const [recentEvents, setRecentEvents] = useState<any[]>([]);
-  const [dailyActivity, setDailyActivity] = useState<any[]>([]);
 
   const loadData = useCallback(() => {
-    try {
-      const total = db.getAllSync(`SELECT COUNT(*) as c FROM events WHERE deleted = 0`) as any[];
-      const done = db.getAllSync(`SELECT COUNT(*) as c FROM events WHERE status = 'done' AND deleted = 0`) as any[];
-      const inprog = db.getAllSync(`SELECT COUNT(*) as c FROM events WHERE status = 'in_progress' AND deleted = 0`) as any[];
-      const pending = db.getAllSync(`SELECT COUNT(*) as c FROM events WHERE status = 'pendiente' AND deleted = 0`) as any[];
-      const projs = db.getAllSync(`SELECT COUNT(*) as c FROM proyectos`) as any[];
-      const pasos = db.getAllSync(`SELECT COUNT(*) as c FROM pasos`) as any[];
-      const deleted = db.getAllSync(`SELECT COUNT(*) as c FROM events WHERE deleted = 1`) as any[];
+    getAllEvents().then((all: any[]) => {
+      const done = all.filter(t => t.status === 'done').length;
+      const inprog = all.filter(t => t.status === 'in_progress').length;
+      const pending = all.filter(t => t.status === 'pendiente').length;
+      setStats({ total: all.length, done, inprog, pending });
 
-      setStats({
-        total: total[0]?.c || 0,
-        done: done[0]?.c || 0,
-        inprog: inprog[0]?.c || 0,
-        pending: pending[0]?.c || 0,
-        projs: projs[0]?.c || 0,
-        pasos: pasos[0]?.c || 0,
-        deleted: deleted[0]?.c || 0,
-      });
+      const catMap: Record<string, number> = {};
+      all.forEach(t => { if (t.categoria) catMap[t.categoria] = (catMap[t.categoria] || 0) + 1; });
+      setCatStats(Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([label, value], i) => ({ label, value, color: CAT_COLORS[i % CAT_COLORS.length] })));
 
-      const cats = db.getAllSync(
-        `SELECT categoria as label, COUNT(*) as value FROM events WHERE deleted = 0 GROUP BY categoria ORDER BY value DESC`
-      ) as any[];
-      setCatStats(cats.map((c: any, i: number) => ({ ...c, color: CAT_COLORS[i % CAT_COLORS.length] })));
+      const impMap: Record<string, number> = {};
+      all.filter(t => t.status !== 'done').forEach(t => { if (t.importance) impMap[t.importance] = (impMap[t.importance] || 0) + 1; });
+      setImportanceStats(Object.entries(impMap).map(([label, value]) => ({ label, value, color: label === 'Alta' ? '#FF3B30' : label === 'Media' ? '#FF9500' : '#A5CB90' })));
+    }).catch(console.error);
 
-      const imp = db.getAllSync(
-        `SELECT importance as label, COUNT(*) as value FROM events WHERE deleted = 0 AND status != 'done' GROUP BY importance ORDER BY value DESC`
-      ) as any[];
-      setImportanceStats(imp.map((d: any) => ({
-        ...d,
-        color: d.label === 'Alta' ? '#FF3B30' : d.label === 'Media' ? '#FF9500' : '#A5CB90'
-      })));
+    getProyectos().then((projs: any[]) => {
+      setStats((prev: any) => ({ ...prev, projs: projs.length }));
+    }).catch(console.error);
 
-    } catch (e) { console.log('stats error:', e); }
-
-    try {
-      const top = db.getAllSync(
-        `SELECT event as label, COUNT(*) as value FROM analytics GROUP BY event ORDER BY value DESC LIMIT 8`
-      ) as any[];
-      setTopEvents(top);
-
-      const recent = db.getAllSync(
-        `SELECT event, meta, timestamp FROM analytics ORDER BY timestamp DESC LIMIT 20`
-      ) as any[];
-      setRecentEvents(recent);
-
-      const daily = db.getAllSync(`
-        SELECT substr(timestamp, 6, 5) as label, COUNT(*) as y
-        FROM analytics
-        WHERE timestamp >= date('now', '-7 days')
-        GROUP BY substr(timestamp, 1, 10)
-        ORDER BY timestamp ASC
-      `) as any[];
-      setDailyActivity(daily.map((d: any, i: number) => ({ x: i + 1, y: d.y, label: d.label })));
-
-    } catch (e) {
-      setTopEvents([]);
-      setRecentEvents([]);
-      setDailyActivity([]);
-    }
+    getAnalytics().then((events: any[]) => {
+      setRecentEvents(events.slice(0, 20));
+      const eventMap: Record<string, number> = {};
+      events.forEach(e => { eventMap[e.event] = (eventMap[e.event] || 0) + 1; });
+      setTopEvents(Object.entries(eventMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value })));
+    }).catch(() => { setRecentEvents([]); setTopEvents([]); });
   }, []);
 
   useFocusEffect(loadData);
@@ -146,58 +86,33 @@ export default function AnalyticsScreen() {
       <Text style={styles.title}>Stats</Text>
       <Text style={styles.subtitle}>Dashboard de uso — BatiReminder</Text>
 
-      {/* Stats Grid */}
       <View style={styles.grid}>
-        <View style={[styles.statCard, { backgroundColor: '#DFF0D8' }]}>
-          <Text style={styles.statNum}>{stats.total}</Text>
-          <Text style={styles.statLbl}>Total tareas</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#A5CB90' }]}>
-          <Text style={styles.statNum}>{stats.done}</Text>
-          <Text style={styles.statLbl}>Completadas</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FFE5A0' }]}>
-          <Text style={styles.statNum}>{stats.inprog}</Text>
-          <Text style={styles.statLbl}>En progreso</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FFB3C6' }]}>
-          <Text style={styles.statNum}>{stats.pending}</Text>
-          <Text style={styles.statLbl}>Pendientes</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#C9B8E8' }]}>
-          <Text style={styles.statNum}>{stats.projs}</Text>
-          <Text style={styles.statLbl}>Proyectos</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#A8D8EA' }]}>
-          <Text style={styles.statNum}>{stats.pasos}</Text>
-          <Text style={styles.statLbl}>Pasos</Text>
-        </View>
+        <View style={[styles.statCard, { backgroundColor: '#DFF0D8' }]}><Text style={styles.statNum}>{stats.total || 0}</Text><Text style={styles.statLbl}>Total tareas</Text></View>
+        <View style={[styles.statCard, { backgroundColor: '#A5CB90' }]}><Text style={styles.statNum}>{stats.done || 0}</Text><Text style={styles.statLbl}>Completadas</Text></View>
+        <View style={[styles.statCard, { backgroundColor: '#FFE5A0' }]}><Text style={styles.statNum}>{stats.inprog || 0}</Text><Text style={styles.statLbl}>En progreso</Text></View>
+        <View style={[styles.statCard, { backgroundColor: '#FFB3C6' }]}><Text style={styles.statNum}>{stats.pending || 0}</Text><Text style={styles.statLbl}>Pendientes</Text></View>
+        <View style={[styles.statCard, { backgroundColor: '#C9B8E8' }]}><Text style={styles.statNum}>{stats.projs || 0}</Text><Text style={styles.statLbl}>Proyectos</Text></View>
       </View>
 
-      {/* Completion Rate */}
       {stats.total > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Tasa de completado — {pct}%</Text>
-          <View style={styles.progressBg}>
-            <View style={[styles.progressFill, { width: `${pct}%` as any }]} />
-          </View>
+          <View style={styles.progressBg}><View style={[styles.progressFill, { width: `${pct}%` as any }]} /></View>
           <Text style={styles.progressLabel}>{stats.done} de {stats.total} tareas completadas</Text>
         </View>
       )}
 
-      {/* Status Distribution */}
       {stats.total > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Estado de tareas</Text>
           <DonutChart slices={[
-            { label: 'Completadas', value: stats.done, color: '#A5CB90' },
-            { label: 'En progreso', value: stats.inprog, color: '#FFE5A0' },
-            { label: 'Pendientes', value: stats.pending, color: '#FFB3C6' },
+            { label: 'Completadas', value: stats.done || 0, color: '#A5CB90' },
+            { label: 'En progreso', value: stats.inprog || 0, color: '#FFE5A0' },
+            { label: 'Pendientes', value: stats.pending || 0, color: '#FFB3C6' },
           ]} />
         </View>
       )}
 
-      {/* Tasks by Category */}
       {catStats.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Tareas por categoria</Text>
@@ -205,7 +120,6 @@ export default function AnalyticsScreen() {
         </View>
       )}
 
-      {/* Importance of Pending */}
       {importanceStats.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Importancia de pendientes</Text>
@@ -213,15 +127,6 @@ export default function AnalyticsScreen() {
         </View>
       )}
 
-      {/* Daily Activity */}
-      {dailyActivity.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Actividad ultimos 7 dias</Text>
-          <LineChart data={dailyActivity} />
-        </View>
-      )}
-
-      {/* Top Actions */}
       {topEvents.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Acciones mas frecuentes</Text>
@@ -229,7 +134,6 @@ export default function AnalyticsScreen() {
         </View>
       )}
 
-      {/* Recent Activity */}
       {recentEvents.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Actividad reciente</Text>
@@ -249,10 +153,9 @@ export default function AnalyticsScreen() {
       {topEvents.length === 0 && recentEvents.length === 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Actividad</Text>
-          <Text style={styles.empty}>Usa la app para ver stats de actividad aqui!</Text>
+          <Text style={styles.empty}>Usa la app para ver stats aqui!</Text>
         </View>
       )}
-
     </ScrollView>
   );
 }
